@@ -61,7 +61,39 @@ body {
   flex-direction: column;
 }
 
-.header { margin-bottom: 2.5rem; }
+.header { margin-bottom: 1.75rem; }
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 1.75rem;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  padding: 10px 12px;
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.tab:hover { color: var(--text); }
+
+.tab.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
 
 .badge {
   display: inline-flex;

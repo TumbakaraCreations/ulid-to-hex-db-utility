@@ -1,41 +1,96 @@
 import { useState, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ulidToHex, buildResult, type ConversionResult } from "./lib/ulid";
+import {
+  ulidToHex,
+  hexToUlid,
+  buildUlidToHexResult,
+  buildHexToUlidResult,
+  type UlidToHexResult,
+  type HexToUlidResult,
+} from "./lib/ulid";
 import { SqlBlock } from "./components/SqlBlock";
 import { useCopy } from "./hooks/useCopy";
 import "./App.css";
 
+type Tab = "ulidToHex" | "hexToUlid";
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: "ulidToHex", label: "ULID → Hex" },
+  { id: "hexToUlid", label: "Hex → ULID" },
+];
+
 export default function App() {
+  const [tab, setTab] = useState<Tab>("ulidToHex");
   const [input, setInput] = useState("");
-  const [result, setResult] = useState<ConversionResult | null>(null);
+  const [ulidToHexResult, setUlidToHexResult] = useState<UlidToHexResult | null>(null);
+  const [hexToUlidResult, setHexToUlidResult] = useState<HexToUlidResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { copiedId, copy } = useCopy();
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setInput(val);
+  const isUlidToHex = tab === "ulidToHex";
+  const result = isUlidToHex ? ulidToHexResult : hexToUlidResult;
 
-    if (!val.trim()) {
-      setResult(null);
-      setError(null);
-      return;
-    }
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setInput(val);
 
-    try {
-      const hex = ulidToHex(val);
-      setResult(buildResult(hex));
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-      setResult(null);
-    }
-  }, []);
+      if (!val.trim()) {
+        setUlidToHexResult(null);
+        setHexToUlidResult(null);
+        setError(null);
+        return;
+      }
+
+      try {
+        if (isUlidToHex) {
+          const hex = ulidToHex(val);
+          setUlidToHexResult(buildUlidToHexResult(hex));
+          setHexToUlidResult(null);
+        } else {
+          const ulid = hexToUlid(val);
+          const hex = val.trim().replace(/^0x/i, "").replace(/\s+/g, "").toUpperCase();
+          setHexToUlidResult(buildHexToUlidResult(hex, ulid));
+          setUlidToHexResult(null);
+        }
+        setError(null);
+      } catch (err) {
+        setError((err as Error).message);
+        setUlidToHexResult(null);
+        setHexToUlidResult(null);
+      }
+    },
+    [isUlidToHex],
+  );
+
+  const handleTabChange = (nextTab: Tab) => {
+    if (nextTab === tab) return;
+    setTab(nextTab);
+    setInput("");
+    setUlidToHexResult(null);
+    setHexToUlidResult(null);
+    setError(null);
+  };
 
   const handleClear = () => {
     setInput("");
-    setResult(null);
+    setUlidToHexResult(null);
+    setHexToUlidResult(null);
     setError(null);
   };
+
+  const inputHint = (() => {
+    if (error) return null;
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return isUlidToHex
+        ? "26-character Crockford Base32 string"
+        : "32-character hex string (16 bytes)";
+    }
+    if (isUlidToHex) return `${trimmed.length} / 26 characters`;
+    const hexLen = trimmed.replace(/^0x/i, "").replace(/\s+/g, "").length;
+    return `${hexLen} / 32 characters`;
+  })();
 
   return (
     <div className="app">
@@ -50,31 +105,49 @@ export default function App() {
         >
           <div className="badge">DB Utility</div>
           <h1>
-            ULID <span className="arrow">→</span> Hex
+            ULID <span className="arrow">↔</span> Hex
           </h1>
           <p className="subtitle">
-            Convert a ULID string to its <code>BINARY(16)</code> hex for raw SQL queries.
+            Convert between ULID strings and <code>BINARY(16)</code> hex for raw SQL queries.
             Runs entirely in your browser.
           </p>
         </motion.header>
+
+        <nav className="tabs" aria-label="Conversion direction">
+          {tabs.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              className={`tab ${tab === id ? "active" : ""}`}
+              onClick={() => handleTabChange(id)}
+              aria-selected={tab === id}
+              role="tab"
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
 
         <motion.section
           className="input-section"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
-          aria-label="ULID input"
+          aria-label={isUlidToHex ? "ULID input" : "Hex input"}
+          role="tabpanel"
         >
-          <label htmlFor="ulid-input" className="field-label">
-            ULID string
+          <label htmlFor="converter-input" className="field-label">
+            {isUlidToHex ? "ULID string" : "Hex string"}
           </label>
           <div className="input-wrap">
             <input
-              id="ulid-input"
+              id="converter-input"
               type="text"
               value={input}
               onChange={handleChange}
-              placeholder="01ARZ3NDEKTSV4RRFFQ69G5FAV"
+              placeholder={
+                isUlidToHex ? "01ARZ3NDEKTSV4RRFFQ69G5FAV" : "017C73C10D0A802690B1D177E527DE66"
+              }
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"
@@ -124,9 +197,7 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.15 }}
                 >
-                  {input.trim()
-                    ? `${input.trim().length} / 26 characters`
-                    : "26-character Crockford Base32 string"}
+                  {inputHint}
                 </motion.p>
               )}
             </AnimatePresence>
@@ -155,16 +226,29 @@ export default function App() {
                 transition={{ duration: 0.2 }}
               >
                 <div className="hex-result-header">
-                  <span className="field-label">Hex (32 chars)</span>
+                  <span className="field-label">
+                    {isUlidToHex ? "Hex (32 chars)" : "ULID (26 chars)"}
+                  </span>
                   <button
-                    className={`copy-btn ${copiedId === "hex" ? "copied" : ""}`}
-                    onClick={() => copy(result.hex, "hex")}
-                    aria-label="Copy hex string"
+                    className={`copy-btn ${copiedId === "output" ? "copied" : ""}`}
+                    onClick={() =>
+                      copy(
+                        isUlidToHex
+                          ? (result as UlidToHexResult).hex
+                          : (result as HexToUlidResult).ulid,
+                        "output",
+                      )
+                    }
+                    aria-label={isUlidToHex ? "Copy hex string" : "Copy ULID string"}
                   >
-                    {copiedId === "hex" ? "copied ✓" : "copy"}
+                    {copiedId === "output" ? "copied ✓" : "copy"}
                   </button>
                 </div>
-                <div className="hex-value">{result.hex}</div>
+                <div className="hex-value">
+                  {isUlidToHex
+                    ? (result as UlidToHexResult).hex
+                    : (result as HexToUlidResult).ulid}
+                </div>
               </motion.div>
 
               <div className="sql-blocks">
