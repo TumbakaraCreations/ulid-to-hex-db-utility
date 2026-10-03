@@ -1,0 +1,108 @@
+name: Production Build & Deploy to DigitalOcean
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag or branch to deploy (e.g., v1.0.0)"
+        required: true
+        default: ""
+
+env:
+  DEPLOY_DIR: /var/www/ulid-to-hex-converter
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Get secrets from Bitwarden
+        uses: bitwarden/sm-action@v3.0.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          base_url: https://vault.bitwarden.eu
+          secrets: |
+            ${{ secrets.BW_SECRET_DO_SSH_KEY }} > DO_SSH_KEY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc -b -b
+
+      - name: Build ulid-to-hex-converter
+        run: npx vite build --mode prod
+
+      - name: Create build archive
+        shell: bash
+        run: tar -czf ulid-to-hex-converter-dist.tar.gz dist
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v3
+        if: startsWith(github.event.inputs.ref, 'v')
+        with:
+          tag_name: ${{ github.event.inputs.ref }}
+          files: ulid-to-hex-converter-dist.tar.gz
+
+      - name: Create release directory
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.DO_HOST }}
+          username: ${{ vars.DO_USERNAME }}
+          key: ${{ env.DO_SSH_KEY }}
+          port: 22
+          script: |
+            mkdir -p ${{ env.DEPLOY_DIR }}
+
+      - name: Upload archive to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.DO_HOST }}
+          username: ${{ vars.DO_USERNAME }}
+          key: ${{ env.DO_SSH_KEY }}
+          port: 22
+          source: ulid-to-hex-converter-dist.tar.gz
+          target: ${{ env.DEPLOY_DIR }}
+          strip_components: 0
+
+      - name: Extract archive on server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.DO_HOST }}
+          username: ${{ vars.DO_USERNAME }}
+          key: ${{ env.DO_SSH_KEY }}
+          port: 22
+          script: |
+            cd ${{ env.DEPLOY_DIR }}
+            rm -rf dist
+            tar -xzf ulid-to-hex-converter-dist.tar.gz
+            rm -f ulid-to-hex-converter-dist.tar.gz
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.DO_HOST }}
+          username: ${{ vars.DO_USERNAME }}
+          key: ${{ env.DO_SSH_KEY }}
+          port: 22
+          script: |
+            echo "✅ Deployed ulid-to-hex-converter dist:"
+            ls -lh ${{ env.DEPLOY_DIR }}/dist
